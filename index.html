@@ -2,65 +2,44 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>円形ブロック崩し（修正版）</title>
+<title>円形ブロック崩し（反射ビーム攻撃版・色不変）</title>
 <style>
-body { background: #111; color: #eee; text-align: center; font-family: sans-serif; margin: 0; }
-canvas { background: #000; border: 1px solid #555; margin-top: 10px; cursor: crosshair; }
+  body { background: #111; color: #eee; text-align: center; font-family: sans-serif; margin: 0; }
+  canvas { background: #000; border: 1px solid #555; margin-top: 10px; cursor: crosshair; }
 </style>
 </head>
 <body>
 <h2>円形ブロック崩し</h2>
-<p>操作：マウス移動(パドル回転) / クリック or スペース(ビーム発射)</p>
+<p>操作：マウス(回転) / クリック or スペース(ビーム発射)</p>
 <canvas id="game" width="600" height="600"></canvas>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const W = 600, H = 600, cx = 300, cy = 300;
-
-const fieldRadius = 260;
-const blockRadius = 200;
-const paddleRadius = 170;
-const paddleWidthAngle = Math.PI / 14;
-let paddleAngle = -Math.PI / 2;
-let lives = 10;
+const fieldRadius = 260, blockRadius = 200, paddleRadius = 170, paddleWidthAngle = Math.PI / 14;
+let paddleAngle = -Math.PI / 2, lives = 10, gameOver = false;
 
 let ball = { x: cx, y: cy, vx: 3, vy: -3, r: 8 };
 let beam = null;
+const blocks = [], blockSize = 20;
 
-const blocks = [];
 for (let i = 0; i < 36; i++) {
     const angle = (i / 36) * Math.PI * 2;
-    blocks.push({ 
-        x: cx + Math.cos(angle) * blockRadius, 
-        y: cy + Math.sin(angle) * blockRadius, 
-        alive: true 
-    });
+    blocks.push({ x: cx + Math.cos(angle) * blockRadius, y: cy + Math.sin(angle) * blockRadius, alive: true });
 }
 
-// 入力処理
-const keys = { left: false, right: false };
-window.addEventListener("keydown", e => { 
-    if(e.key === "ArrowLeft") keys.left = true; 
-    if(e.key === "ArrowRight") keys.right = true; 
-    if(e.key === " ") fireBeam(); 
-});
-window.addEventListener("keyup", e => { 
-    if(e.key === "ArrowLeft") keys.left = false; 
-    if(e.key === "ArrowRight") keys.right = false; 
-});
-canvas.addEventListener("mousedown", fireBeam); // 左クリックで発射
-
+window.addEventListener("keydown", e => { if (e.key === " ") fireBeam(); });
+canvas.addEventListener("mousedown", fireBeam);
 function fireBeam() {
-    if (beam) return;
-    const speed = 10;
-    // パドルの方向（中心に向かうベクトル）を計算
-    const angleToCenter = paddleAngle + Math.PI; 
+    if (beam || gameOver) return;
+    const speed = 12;
     beam = {
         x: cx + Math.cos(paddleAngle) * paddleRadius,
         y: cy + Math.sin(paddleAngle) * paddleRadius,
-        vx: Math.cos(angleToCenter) * speed,
-        vy: Math.sin(angleToCenter) * speed
+        vx: Math.cos(paddleAngle + Math.PI) * speed,
+        vy: Math.sin(paddleAngle + Math.PI) * speed,
+        isPowerful: false
     };
 }
 
@@ -70,59 +49,92 @@ canvas.addEventListener("mousemove", e => {
 });
 
 function update() {
-    if(keys.left) paddleAngle -= 0.05;
-    if(keys.right) paddleAngle += 0.05;
+    if (gameOver) return;
 
     if (beam) {
         beam.x += beam.vx; beam.y += beam.vy;
         
-        // 中心まで到達したら消去
-        const d = Math.hypot(beam.x - cx, beam.y - cy);
-        if (d < 20) beam = null; 
-        
-        // 玉との衝突（当たり判定を少し大きく）
-        if (beam && Math.hypot(beam.x - ball.x, ball.y - beam.y) < 20) {
+        if (Math.hypot(beam.x - ball.x, beam.y - ball.y) < 25) {
+            beam.isPowerful = true; 
             const angleToCenter = Math.atan2(cy - ball.y, cx - ball.x);
-            const speed = Math.hypot(ball.vx, ball.vy);
-            ball.vx = Math.cos(angleToCenter) * speed;
-            ball.vy = Math.sin(angleToCenter) * speed;
-            beam = null;
+            const speed = Math.hypot(beam.vx, beam.vy);
+            beam.vx = Math.cos(angleToCenter) * speed;
+            beam.vy = Math.sin(angleToCenter) * speed;
         }
+
+        if (beam.isPowerful) {
+            blocks.forEach(b => {
+                if (b.alive && Math.hypot(beam.x - b.x, beam.y - b.y) < 20) {
+                    b.alive = false;
+                }
+            });
+        }
+        
+        if (Math.hypot(beam.x - cx, beam.y - cy) > fieldRadius) beam = null;
     }
 
     ball.x += ball.vx; ball.y += ball.vy;
-    
-    // 外壁反射
-    const dist = Math.hypot(ball.x - cx, ball.y - cy);
-    if (dist + ball.r > fieldRadius) {
+
+    for (const b of blocks) {
+        if (!b.alive) continue;
+        if (Math.hypot(ball.x - b.x, ball.y - b.y) < ball.r + blockSize / 2) {
+            b.alive = false;
+            ball.vx *= -1; ball.vy *= -1;
+            break;
+        }
+    }
+
+    const distFromCenter = Math.hypot(ball.x - cx, ball.y - cy);
+    if (Math.abs(distFromCenter - paddleRadius) < 10) {
         const angle = Math.atan2(ball.y - cy, ball.x - cx);
+        let diff = angle - paddleAngle;
+        diff = (diff + Math.PI) % (Math.PI * 2) - Math.PI;
+        if (Math.abs(diff) < paddleWidthAngle) {
+            lives--;
+            if (lives <= 0) gameOver = true;
+            ball.vx *= -1; ball.vy *= -1;
+        }
+    }
+
+    if (distFromCenter > fieldRadius - ball.r) {
+        const nx = (ball.x - cx) / distFromCenter;
+        const ny = (ball.y - cy) / distFromCenter;
+        const dot = ball.vx * nx + ball.vy * ny;
+        ball.vx -= 2 * dot * nx;
+        ball.vy -= 2 * dot * ny;
+        const angle = Math.atan2(ball.vy, ball.vx) + (Math.random() - 0.5) * 0.1;
         const speed = Math.hypot(ball.vx, ball.vy);
-        ball.vx = Math.cos(angle + Math.PI) * speed;
-        ball.vy = Math.sin(angle + Math.PI) * speed;
-        ball.x = cx + Math.cos(angle) * (fieldRadius - ball.r);
-        ball.y = cy + Math.sin(angle) * (fieldRadius - ball.r);
+        ball.vx = Math.cos(angle) * speed;
+        ball.vy = Math.sin(angle) * speed;
+        ball.x = cx + nx * (fieldRadius - ball.r);
+        ball.y = cy + ny * (fieldRadius - ball.r);
     }
 }
 
 function draw() {
     ctx.clearRect(0, 0, W, H);
-    
-    // ブロック
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, fieldRadius, 0, Math.PI * 2); ctx.stroke();
+
     ctx.fillStyle = "#4af";
-    blocks.forEach(b => { if(b.alive) ctx.fillRect(b.x-10, b.y-10, 20, 20); });
+    blocks.forEach(b => { if(b.alive) ctx.fillRect(b.x - blockSize/2, b.y - blockSize/2, blockSize, blockSize); });
+
+    if (!gameOver) {
+        ctx.strokeStyle = "#fa4"; ctx.lineWidth = 10;
+        ctx.beginPath(); ctx.arc(cx, cy, paddleRadius, paddleAngle - paddleWidthAngle, paddleAngle + paddleWidthAngle); ctx.stroke();
+    }
     
-    // パドル
-    ctx.strokeStyle = "#fa4"; ctx.lineWidth = 10;
-    ctx.beginPath(); 
-    ctx.arc(cx, cy, paddleRadius, paddleAngle - paddleWidthAngle, paddleAngle + paddleWidthAngle); 
-    ctx.stroke();
-    
-    // 玉
     ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
     
-    // ビーム
-    if (beam) { ctx.fillStyle = "#ff0"; ctx.fillRect(beam.x-5, beam.y-5, 10, 10); }
-
+    // ビーム：常に黄色
+    if (beam) { 
+        ctx.fillStyle = "#ff0"; 
+        ctx.fillRect(beam.x-15, beam.y-15, 35, 35); 
+    }
+    
+    ctx.fillStyle = "#fff"; ctx.font = "20px Arial"; ctx.fillText("残機: " + lives, 20, 30);
+    if (gameOver) ctx.fillText("GAME OVER", W/2-60, H/2);
+    
     update();
     requestAnimationFrame(draw);
 }
